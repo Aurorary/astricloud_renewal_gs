@@ -63,6 +63,7 @@ function onOpen() {
     .addItem('📧 Check & Send Renewal Reminders', 'checkAndSendReminders')
     .addItem('🔄 Sync Renewals from Renewal Status', 'syncRenewals')
     .addItem('📦 Archive Terminated Customers', 'archiveTerminated')
+    .addItem('🧹 Remove Archived Duplicates from Tracker', 'removeArchivedDuplicatesFromTracker')
     .addItem('🔁 Backfill Missing Paid Status', 'backfillMissingPaidStatus')
     .addSeparator()
     .addItem('🔽 Setup Renewal Status Dropdown', 'setupRenewalStatusDropdown')
