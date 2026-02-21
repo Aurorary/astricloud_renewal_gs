@@ -3,3 +3,4 @@
 *.md
 *.claude
 appscript.json
+*.js
