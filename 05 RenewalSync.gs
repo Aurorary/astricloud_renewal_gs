@@ -47,6 +47,9 @@ function syncRenewals() {
     // Update contract end date in TRACKER
     trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.CONTRACT_END).setValue(newEndDate);
 
+    // Extend month header columns if the new contract end goes beyond existing headers
+    extendMonthHeaders(trackerSheet, newEndDate);
+
     // Populate another 12 months — use day 1 to avoid month-end overflow (e.g. Mar 31 + 1 month = May 1, not Apr 1)
     populate12MonthsFromDate(trackerSheet, i + 1, newStartDate);
 
@@ -105,6 +108,78 @@ function populate12MonthsFromDate(sheet, rowNumber, startDate) {
       Logger.log(`Column not found for ${targetMonthYear} — header may be missing or out of range`);
     }
   }
+}
+
+/**
+ * Extend TRACKER month header columns (rows 1 & 2) up to the given date.
+ * Row 2: adds MMM-yyyy labels. Row 1: adds year number at the first month of each new year.
+ * No-ops if headers already cover the required range.
+ */
+function extendMonthHeaders(sheet, upToDate) {
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+
+  // Find the last month column by scanning backwards
+  let lastMonthDate = null;
+  let lastMonthCol = -1; // 1-based column number
+
+  for (let i = headers.length - 1; i >= CONFIG.TRACKER_COLS.FIRST_MONTH - 1; i--) {
+    const header = headers[i];
+    let parsed = null;
+
+    if (typeof header === 'string' && header.trim() !== '') {
+      const parts = header.trim().split('-');
+      if (parts.length === 2) {
+        const m = monthNames.indexOf(parts[0]);
+        const y = parseInt(parts[1]);
+        if (m !== -1 && !isNaN(y)) parsed = new Date(y, m, 1);
+      }
+    } else if (header instanceof Date) {
+      parsed = new Date(header.getFullYear(), header.getMonth(), 1);
+    }
+
+    if (parsed) {
+      lastMonthDate = parsed;
+      lastMonthCol = i + 1; // convert to 1-based
+      break;
+    }
+  }
+
+  if (!lastMonthDate) {
+    Logger.log('extendMonthHeaders: Could not find last month header');
+    return;
+  }
+
+  const upToMonth = new Date(upToDate.getFullYear(), upToDate.getMonth(), 1);
+  if (upToMonth <= lastMonthDate) {
+    Logger.log('extendMonthHeaders: Headers already cover up to ' + Utilities.formatDate(upToMonth, Session.getScriptTimeZone(), 'MMM-yyyy'));
+    return;
+  }
+
+  // Append new month columns one by one
+  let current = new Date(lastMonthDate.getFullYear(), lastMonthDate.getMonth() + 1, 1);
+  let colNumber = lastMonthCol + 1;
+  let added = 0;
+
+  while (current <= upToMonth) {
+    const monthLabel = Utilities.formatDate(current, Session.getScriptTimeZone(), 'MMM-yyyy');
+
+    // Row 2: month label (e.g. Jan-2028)
+    sheet.getRange(2, colNumber).setValue(monthLabel);
+
+    // Row 1: year label only on the first month of each new year (January)
+    if (current.getMonth() === 0) {
+      sheet.getRange(1, colNumber).setValue(current.getFullYear());
+    }
+
+    Logger.log('extendMonthHeaders: Added column ' + colNumber + ' → ' + monthLabel);
+    current = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+    colNumber++;
+    added++;
+  }
+
+  Logger.log('extendMonthHeaders: Added ' + added + ' new column(s) up to ' + Utilities.formatDate(upToMonth, Session.getScriptTimeZone(), 'MMM-yyyy'));
 }
 
 /**
