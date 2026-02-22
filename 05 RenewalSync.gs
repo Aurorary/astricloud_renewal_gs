@@ -13,6 +13,9 @@ function syncRenewals() {
 
   const trackerData = trackerSheet.getDataRange().getValues();
   let renewalsProcessed = 0;
+  const renewedCompanies = [];
+  const terminatedCompanies = [];
+  let emailsSent = 0;
 
   // Skip header rows (data starts row 3, i=2)
   for (let i = 2; i < trackerData.length; i++) {
@@ -32,7 +35,9 @@ function syncRenewals() {
       trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Terminated');
       if (companyEmail) {
         sendTerminationEmail(companyName, companyEmail, pilotNumber, currentEndDate);
+        emailsSent++;
       }
+      terminatedCompanies.push(companyName);
       Logger.log(`Marked ${companyName} as Terminated. Termination email sent. Run Archive Terminated Customers when ready.`);
       continue;
     }
@@ -56,20 +61,38 @@ function syncRenewals() {
     // Send thank you email with new tenure
     if (companyEmail) {
       sendRenewalConfirmationEmail(companyName, companyEmail, pilotNumber, newStartDate, newEndDate);
+      emailsSent++;
     }
 
     // Mark as Renewed in col F
     trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Renewed');
 
+    const newStartStr = Utilities.formatDate(newStartDate, Session.getScriptTimeZone(), 'MMM yyyy');
+    const newEndStr   = Utilities.formatDate(newEndDate,   Session.getScriptTimeZone(), 'MMM yyyy');
+    renewedCompanies.push(`${companyName} (${newStartStr} – ${newEndStr})`);
     Logger.log(`Extended contract for ${companyName}: ${newStartDate.toDateString()} – ${newEndDate.toDateString()}`);
     renewalsProcessed++;
   }
 
   Logger.log(`Renewals processed: ${renewalsProcessed}`);
 
-  if (renewalsProcessed > 0) {
-    SpreadsheetApp.getUi().alert(`✅ Processed ${renewalsProcessed} renewals`);
+  const parts = [];
+
+  if (renewedCompanies.length > 0) {
+    parts.push(`Renewals extended: ${renewedCompanies.length}\n${renewedCompanies.map(n => `• ${n}`).join('\n')}`);
   }
+  if (terminatedCompanies.length > 0) {
+    parts.push(`Terminated: ${terminatedCompanies.length}\n${terminatedCompanies.map(n => `• ${n}`).join('\n')}`);
+  }
+
+  let message;
+  if (parts.length > 0) {
+    const emailLine = emailsSent > 0 ? `\n\nEmails sent: ${emailsSent}` : '';
+    message = `✅ Sync complete\n\n${parts.join('\n\n')}${emailLine}`;
+  } else {
+    message = `ℹ️ Nothing to sync.\n\nNo companies are marked "Renew" or "Not Renewing".`;
+  }
+  SpreadsheetApp.getUi().alert(message);
 }
 
 /**

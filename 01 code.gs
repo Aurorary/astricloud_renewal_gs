@@ -58,16 +58,17 @@ var CONFIG = {
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🤖 AstriCloud Automation')
-    .addItem('[01]Highlight Current Month', 'highlightCurrentMonth')
-    .addItem('[02]Copy New Entries from Form', 'copyNewEntriesToTracker')
-    .addItem('[03]Check & Send Renewal Reminders', 'checkAndSendReminders')
-    .addItem('[04]Backfill Missing Paid Status', 'backfillMissingPaidStatus')
-    .addItem('[05]Sync Renewals from Renewal Status', 'syncRenewals')
-    .addItem('[06]Archive Terminated Customers', 'archiveTerminated')
+    .addItem('[01] Copy New Entries from Form', 'copyNewEntriesToTracker')
+    .addItem('[02] Check & Send Renewal Reminders', 'checkAndSendReminders')
+    .addItem('[03] Backfill Missing Paid Status', 'backfillMissingPaidStatus')
+    .addItem('[04] Sync Renewals from Renewal Status', 'syncRenewals')
+    .addItem('[05] Archive Terminated Customers', 'archiveTerminated')
+    .addItem('[06] Sort by Contract Start Date', 'sortByContractStartDate')
     .addSeparator()
     .addItem('Setup Renewal Status Dropdown', 'setupRenewalStatusDropdown')
     .addItem('Remove Archived Duplicates from Tracker', 'removeArchivedDuplicatesFromTracker')
     .addToUi();
+    // .addItem('[01] Highlight Current Month', 'highlightCurrentMonth')
     // .addItem('Setup Time-based Triggers', 'setupTriggers')
     // .addItem('Remove All Triggers', 'removeAllTriggers')
 }

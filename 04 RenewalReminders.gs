@@ -13,6 +13,9 @@ function checkAndSendReminders() {
   const data = trackerSheet.getDataRange().getValues();
   const now = new Date();
   let remindersSent = 0;
+  const reminderDetails = [];
+  let skippedPending = 0;
+  let skippedRenew = 0;
 
   Logger.log(`--- checkAndSendReminders started | Today: ${now.toDateString()} | REMINDER_MONTHS: [${CONFIG.REMINDER_MONTHS}] ---`);
 
@@ -39,11 +42,13 @@ function checkAndSendReminders() {
 
       if (renewalStatus === 'Renew') {
         Logger.log(`Row ${i + 1} SKIPPED — ${companyName} | Already marked Renew`);
+        skippedRenew++;
         continue;
       }
 
       if (renewalStatus === 'Pending') {
         Logger.log(`Row ${i + 1} SKIPPED — ${companyName} | Reminder already sent (Pending)`);
+        skippedPending++;
         continue;
       }
 
@@ -58,6 +63,7 @@ function checkAndSendReminders() {
           .build()
       );
 
+      reminderDetails.push({ name: companyName, monthsLeft: monthsUntilExpiry });
       remindersSent++;
     } else {
       Logger.log(`Row ${i + 1} SKIPPED — ${companyName} | monthsUntilExpiry (${monthsUntilExpiry}) not in REMINDER_MONTHS or endDate already passed`);
@@ -65,6 +71,23 @@ function checkAndSendReminders() {
   }
 
   Logger.log(`Renewal reminders sent: ${remindersSent}`);
+
+  let message;
+  if (remindersSent > 0) {
+    const list = reminderDetails
+      .map(d => `• ${d.name} — ${d.monthsLeft} month${d.monthsLeft === 1 ? '' : 's'} left`)
+      .join('\n');
+    const skipNote = (skippedPending > 0 || skippedRenew > 0)
+      ? `\n\nSkipped: ${skippedPending} already Pending, ${skippedRenew} already Renew`
+      : '';
+    message = `✅ ${remindersSent} renewal reminder${remindersSent === 1 ? '' : 's'} sent\n\n${list}${skipNote}`;
+  } else {
+    const skipNote = (skippedPending > 0 || skippedRenew > 0)
+      ? `\n\nSkipped: ${skippedPending} already Pending, ${skippedRenew} already Renew`
+      : '';
+    message = `ℹ️ No renewal reminders sent.\n\nNo contracts are expiring in the next ${Math.max(...CONFIG.REMINDER_MONTHS)} months.${skipNote}`;
+  }
+  SpreadsheetApp.getUi().alert(message);
 }
 
 /**

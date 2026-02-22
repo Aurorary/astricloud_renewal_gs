@@ -14,38 +14,45 @@ function archiveTerminated() {
   const data = trackerSheet.getDataRange().getValues();
   const headers = data[0];
   let archivedCount = 0;
-  
+  const archivedNames = [];
+
   // Process from bottom to top (to avoid index shifting when deleting rows)
   for (let i = data.length - 1; i >= 1; i--) {
-    
+
     // Check monthly status columns for "terminate"
     let hasTerminate = false;
-    
+
     for (let col = CONFIG.TRACKER_COLS.FIRST_MONTH - 1; col < data[i].length; col++) {
       if (data[i][col] === 'terminate') {
         hasTerminate = true;
         break;
       }
     }
-    
+
     if (hasTerminate) {
       // Copy entire row to ARCHIVED
       archivedSheet.appendRow(data[i]);
-      
+
       // Delete from TRACKER
       trackerSheet.deleteRow(i + 1);
-      
+
       const companyName = data[i][CONFIG.TRACKER_COLS.COMPANY_NAME - 1];
       Logger.log(`Archived: ${companyName}`);
+      archivedNames.push(companyName);
       archivedCount++;
     }
   }
-  
+
   Logger.log(`Total customers archived: ${archivedCount}`);
 
+  let message;
   if (archivedCount > 0) {
-    SpreadsheetApp.getUi().alert(`✅ Archived ${archivedCount} terminated customers`);
+    const list = archivedNames.map(name => `• ${name}`).join('\n');
+    message = `✅ Archived ${archivedCount} terminated customer${archivedCount === 1 ? '' : 's'}\n\n${list}`;
+  } else {
+    message = `ℹ️ No terminated customers found.\n\nNo rows contain "terminate" in the monthly status columns.`;
   }
+  SpreadsheetApp.getUi().alert(message);
 }
 
 /**
