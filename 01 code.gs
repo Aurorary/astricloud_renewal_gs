@@ -65,58 +65,65 @@ function onOpen() {
     .addItem('[05] Archive Terminated Customers', 'archiveTerminated')
     .addItem('[06] Sort by Contract Start Date', 'sortByContractStartDate')
     .addItem('[07] Restore Archived Customer', 'showRestoreArchivedDialog')
+    .addItem('[08] Highlight Renewal Urgency', 'highlightRenewalUrgency')
     .addSeparator()
+    .addItem('Find Lapsed Contracts', 'findLapsedContracts')
+    .addItem('Clear Renewal Highlights', 'clearRenewalHighlights')
     .addItem('Setup Renewal Status Dropdown', 'setupRenewalStatusDropdown')
     .addItem('Remove Archived Duplicates from Tracker', 'removeArchivedDuplicatesFromTracker')
+    .addSeparator()
+    .addItem('Setup Auto-Reminder Trigger (Daily 9 AM)', 'setupAutoReminderTrigger')
+    .addItem('Remove Auto-Reminder Trigger', 'removeAutoReminderTrigger')
     .addToUi();
-    // .addItem('[01] Highlight Current Month', 'highlightCurrentMonth')
-    // .addItem('Setup Time-based Triggers', 'setupTriggers')
-    // .addItem('Remove All Triggers', 'removeAllTriggers')
 }
 
-// /**
-//  * Install time-based triggers for automation
-//  */
-// function setupTriggers() {
-//   // Remove existing triggers first
-//   removeAllTriggers();
+/**
+ * Install a daily time-based trigger for checkAndSendReminders at 9 AM.
+ * Replaces any existing reminder trigger to prevent duplicates.
+ */
+function setupAutoReminderTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
 
-//   // Daily at 8 AM - Copy new entries
-//   ScriptApp.newTrigger('copyNewEntriesToTracker')
-//     .timeBased()
-//     .everyDays(1)
-//     .atHour(8)
-//     .create();
+  // Remove any existing reminder triggers
+  let removed = 0;
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'checkAndSendReminders') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
 
-//   // Daily at 9 AM - Check reminders
-//   ScriptApp.newTrigger('checkAndSendReminders')
-//     .timeBased()
-//     .everyDays(1)
-//     .atHour(9)
-//     .create();
+  // Create new daily trigger at 9 AM
+  ScriptApp.newTrigger('checkAndSendReminders')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
 
-//   // Daily at 7 AM - Highlight current month
-//   ScriptApp.newTrigger('highlightCurrentMonth')
-//     .timeBased()
-//     .everyDays(1)
-//     .atHour(7)
-//     .create();
+  SpreadsheetApp.getUi().alert(
+    `✅ Auto-reminder trigger set\n\n` +
+    `checkAndSendReminders() will run automatically every day at 9 AM.` +
+    (removed > 0 ? `\n\n(${removed} previous trigger(s) replaced)` : '')
+  );
+}
 
-//   // Daily at 10 AM - Sync renewals
-//   ScriptApp.newTrigger('syncRenewals')
-//     .timeBased()
-//     .everyDays(1)
-//     .atHour(10)
-//     .create();
+/**
+ * Remove all time-based triggers for checkAndSendReminders.
+ */
+function removeAutoReminderTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
 
-//   SpreadsheetApp.getUi().alert('✅ Triggers installed successfully!\n\nAutomation will run daily at:\n- 7 AM: Highlight current month\n- 8 AM: Copy new entries\n- 9 AM: Send reminders\n- 10 AM: Sync renewals');
-// }
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'checkAndSendReminders') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
 
-// /**
-//  * Remove all project triggers
-//  */
-// function removeAllTriggers() {
-//   const triggers = ScriptApp.getProjectTriggers();
-//   triggers.forEach(trigger => ScriptApp.deleteTrigger(trigger));
-//   Logger.log('All triggers removed');
-// }
+  SpreadsheetApp.getUi().alert(
+    removed > 0
+      ? `✅ Auto-reminder trigger removed.\n\ncheckAndSendReminders() will no longer run automatically.`
+      : `ℹ️ No auto-reminder trigger found.\n\nNothing to remove.`
+  );
+}

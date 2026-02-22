@@ -1,10 +1,14 @@
 /**
- * Sync renewals from TRACKER col F (Renewal Status)
- * When Renewal Status = "Renew", extend contract by 12 months
+ * Sync renewals from TRACKER col F (Renewal Status).
+ * Shows a preview of all changes and asks for confirmation before applying.
+ * When Renewal Status = "Renew", extends contract by 12 months.
+ * When Renewal Status = "Not Renewing", marks as terminated.
  */
 function syncRenewals() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss           = SpreadsheetApp.getActiveSpreadsheet();
   const trackerSheet = ss.getSheetByName(CONFIG.TRACKER_SHEET);
+  const ui           = SpreadsheetApp.getUi();
+  const tz           = Session.getScriptTimeZone();
 
   if (!trackerSheet) {
     Logger.log('ERROR: TRACKER sheet not found');
@@ -12,72 +16,108 @@ function syncRenewals() {
   }
 
   const trackerData = trackerSheet.getDataRange().getValues();
-  let renewalsProcessed = 0;
-  const renewedCompanies = [];
-  const terminatedCompanies = [];
-  let emailsSent = 0;
 
-  // Skip header rows (data starts row 3, i=2)
+  // ── Pass 1: scan rows, build preview lists ─────────────────────────────────
+  const toRenew     = []; // { rowIdx, companyName, companyEmail, pilotNumber, currentEndDate, newStartDate, newEndDate }
+  const toTerminate = []; // { rowIdx, companyName, companyEmail, pilotNumber, currentEndDate }
+
   for (let i = 2; i < trackerData.length; i++) {
-    const companyName   = trackerData[i][CONFIG.TRACKER_COLS.COMPANY_NAME - 1];
-    const companyEmail  = trackerData[i][CONFIG.TRACKER_COLS.COMPANY_EMAIL - 1];
-    const pilotNumber   = trackerData[i][CONFIG.TRACKER_COLS.PILOT_NUMBER - 1];
+    const companyName   = trackerData[i][CONFIG.TRACKER_COLS.COMPANY_NAME   - 1];
+    const companyEmail  = trackerData[i][CONFIG.TRACKER_COLS.COMPANY_EMAIL  - 1];
+    const pilotNumber   = trackerData[i][CONFIG.TRACKER_COLS.PILOT_NUMBER   - 1];
     const renewalStatus = trackerData[i][CONFIG.TRACKER_COLS.RENEWAL_STATUS - 1];
-    const contractEnd   = trackerData[i][CONFIG.TRACKER_COLS.CONTRACT_END - 1];
+    const contractEnd   = trackerData[i][CONFIG.TRACKER_COLS.CONTRACT_END   - 1];
 
     if (!contractEnd) continue;
 
     const currentEndDate = new Date(contractEnd);
 
-    // --- Handle Not Renewing ---
     if (renewalStatus === 'Not Renewing') {
-      markMonthCell(trackerSheet, i + 1, currentEndDate, 'terminate');
-      trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Terminated');
-      if (companyEmail) {
-        sendTerminationEmail(companyName, companyEmail, pilotNumber, currentEndDate);
-        emailsSent++;
-      }
-      terminatedCompanies.push(companyName);
-      Logger.log(`Marked ${companyName} as Terminated. Termination email sent. Run Archive Terminated Customers when ready.`);
-      continue;
+      toTerminate.push({ rowIdx: i, companyName, companyEmail, pilotNumber, currentEndDate });
+    } else if (renewalStatus === 'Renew') {
+      const newStartDate = new Date(currentEndDate.getFullYear(), currentEndDate.getMonth() + 1, 1);
+      const newEndDate   = new Date(currentEndDate);
+      newEndDate.setFullYear(newEndDate.getFullYear() + 1);
+      toRenew.push({ rowIdx: i, companyName, companyEmail, pilotNumber, currentEndDate, newStartDate, newEndDate });
     }
+  }
 
-    if (renewalStatus !== 'Renew') continue;
+  if (toRenew.length === 0 && toTerminate.length === 0) {
+    ui.alert('ℹ️ Nothing to sync.\n\nNo companies are marked "Renew" or "Not Renewing".');
+    return;
+  }
 
-    // New tenure: starts 1st of the month after current end, ends 12 months later
-    const newStartDate = new Date(currentEndDate.getFullYear(), currentEndDate.getMonth() + 1, 1);
-    const newEndDate   = new Date(currentEndDate);
-    newEndDate.setFullYear(newEndDate.getFullYear() + 1);
+  // ── Preview dialog ─────────────────────────────────────────────────────────
+  const fmt = date => Utilities.formatDate(date, tz, 'dd MMM yyyy');
 
-    // Update contract end date in TRACKER
-    trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.CONTRACT_END).setValue(newEndDate);
+  let previewMsg = '📋 The following changes will be applied:\n';
 
-    // Extend month header columns if the new contract end goes beyond existing headers
-    extendMonthHeaders(trackerSheet, newEndDate);
+  if (toRenew.length > 0) {
+    previewMsg += `\nRenewals to extend (${toRenew.length}):\n`;
+    previewMsg += toRenew.map(r =>
+      `• ${r.companyName}\n  ${fmt(r.currentEndDate)} → ${fmt(r.newEndDate)}`
+    ).join('\n');
+  }
 
-    // Populate another 12 months — use day 1 to avoid month-end overflow (e.g. Mar 31 + 1 month = May 1, not Apr 1)
-    populate12MonthsFromDate(trackerSheet, i + 1, newStartDate);
+  if (toTerminate.length > 0) {
+    previewMsg += `\n\nTerminations to process (${toTerminate.length}):\n`;
+    previewMsg += toTerminate.map(r =>
+      `• ${r.companyName}  (ends ${fmt(r.currentEndDate)})`
+    ).join('\n');
+  }
 
-    // Send thank you email with new tenure
-    if (companyEmail) {
-      sendRenewalConfirmationEmail(companyName, companyEmail, pilotNumber, newStartDate, newEndDate);
+  const emailCount = [...toRenew, ...toTerminate].filter(r => r.companyEmail).length;
+  if (emailCount > 0) {
+    previewMsg += `\n\n📧 ${emailCount} confirmation email(s) will be sent.`;
+  }
+
+  previewMsg += '\n\nProceed?';
+
+  const response = ui.alert('Sync Renewals — Preview', previewMsg, ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) {
+    ui.alert('ℹ️ Sync cancelled. No changes were made.');
+    return;
+  }
+
+  // ── Pass 2: apply changes ──────────────────────────────────────────────────
+  let renewalsProcessed = 0;
+  const renewedCompanies    = [];
+  const terminatedCompanies = [];
+  let emailsSent = 0;
+
+  for (const r of toTerminate) {
+    markMonthCell(trackerSheet, r.rowIdx + 1, r.currentEndDate, 'terminate');
+    trackerSheet.getRange(r.rowIdx + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Terminated');
+    if (r.companyEmail) {
+      sendTerminationEmail(r.companyName, r.companyEmail, r.pilotNumber, r.currentEndDate);
       emailsSent++;
     }
+    terminatedCompanies.push(r.companyName);
+    Logger.log(`Marked ${r.companyName} as Terminated. Run [05] Archive Terminated Customers when ready.`);
+  }
 
-    // Mark as Renewed in col F
-    trackerSheet.getRange(i + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Renewed');
+  for (const r of toRenew) {
+    // New tenure: starts 1st of month after current end, ends 12 months later
+    trackerSheet.getRange(r.rowIdx + 1, CONFIG.TRACKER_COLS.CONTRACT_END).setValue(r.newEndDate);
+    extendMonthHeaders(trackerSheet, r.newEndDate);
+    populate12MonthsFromDate(trackerSheet, r.rowIdx + 1, r.newStartDate);
+    if (r.companyEmail) {
+      sendRenewalConfirmationEmail(r.companyName, r.companyEmail, r.pilotNumber, r.newStartDate, r.newEndDate);
+      emailsSent++;
+    }
+    trackerSheet.getRange(r.rowIdx + 1, CONFIG.TRACKER_COLS.RENEWAL_STATUS).setValue('Renewed');
 
-    const newStartStr = Utilities.formatDate(newStartDate, Session.getScriptTimeZone(), 'MMM yyyy');
-    const newEndStr   = Utilities.formatDate(newEndDate,   Session.getScriptTimeZone(), 'MMM yyyy');
-    renewedCompanies.push(`${companyName} (${newStartStr} – ${newEndStr})`);
-    Logger.log(`Extended contract for ${companyName}: ${newStartDate.toDateString()} – ${newEndDate.toDateString()}`);
+    const newStartStr = Utilities.formatDate(r.newStartDate, tz, 'MMM yyyy');
+    const newEndStr   = Utilities.formatDate(r.newEndDate,   tz, 'MMM yyyy');
+    renewedCompanies.push(`${r.companyName} (${newStartStr} – ${newEndStr})`);
+    Logger.log(`Extended contract for ${r.companyName}: ${r.newStartDate.toDateString()} – ${r.newEndDate.toDateString()}`);
     renewalsProcessed++;
   }
 
   Logger.log(`Renewals processed: ${renewalsProcessed}`);
 
+  // ── Summary alert ──────────────────────────────────────────────────────────
   const parts = [];
-
   if (renewedCompanies.length > 0) {
     parts.push(`Renewals extended: ${renewedCompanies.length}\n${renewedCompanies.map(n => `• ${n}`).join('\n')}`);
   }
@@ -85,14 +125,8 @@ function syncRenewals() {
     parts.push(`Terminated: ${terminatedCompanies.length}\n${terminatedCompanies.map(n => `• ${n}`).join('\n')}`);
   }
 
-  let message;
-  if (parts.length > 0) {
-    const emailLine = emailsSent > 0 ? `\n\nEmails sent: ${emailsSent}` : '';
-    message = `✅ Sync complete\n\n${parts.join('\n\n')}${emailLine}`;
-  } else {
-    message = `ℹ️ Nothing to sync.\n\nNo companies are marked "Renew" or "Not Renewing".`;
-  }
-  SpreadsheetApp.getUi().alert(message);
+  const emailLine = emailsSent > 0 ? `\n\nEmails sent: ${emailsSent}` : '';
+  ui.alert(`✅ Sync complete\n\n${parts.join('\n\n')}${emailLine}`);
 }
 
 /**
