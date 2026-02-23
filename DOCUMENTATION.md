@@ -15,7 +15,7 @@ A Google Apps Script automation system that manages customer contract tracking f
 
 ## Sheet Structure
 
-The spreadsheet contains 3 active sheets:
+The spreadsheet contains 4 active sheets:
 
 ### 1. TRACKER (Main sheet)
 The central tracking sheet with a monthly payment grid. It has **two header rows**:
@@ -49,6 +49,15 @@ Auto-populated by the linked Google Form.
 
 ### 3. ARCHIVED
 Storage for terminated customer records. Same column structure as TRACKER (col A = SEQUENCE formula, col B onwards = customer data). Terminated companies are never re-added to TRACKER by the copy function. Archived companies can be restored back to TRACKER via `[07] Restore Archived Customer`.
+
+### 4. Addresses
+Lookup table mapping WORQ location names to their location-specific email addresses. Used by `getLocationEmail()` to CC the correct location inbox on customer emails.
+
+| Column | Field | Description |
+|--------|-------|-------------|
+| A | Site | WORQ location name (must match exactly what appears in TRACKER col C) |
+| B | Address | Full address of the location (informational only) |
+| C | Emails | Location-specific email address (e.g. `ttdi@worq.space`) |
 
 ---
 
@@ -141,9 +150,11 @@ Sends automated renewal reminder emails at 3, 2, 1 month(s) and 0 months (expiry
 | `checkAndSendReminders()` | Scheduled / Manual | Iterates TRACKER rows, checks months until expiry, sends reminder emails at configured thresholds |
 | `setupRenewalStatusDropdown()` | Manual | Applies dropdown validation (`Pending`, `Renew`, `Renewed`, `Not Renewing`) to all rows in TRACKER col F |
 | `getMonthsDifference(date1, date2)` | Internal | Calculates the whole-month difference between two dates |
-| `sendRenewalReminderEmail(companyName, email, pilotNumber, expiryDate, monthsLeft)` | Internal | Sends the renewal reminder email via `MailApp.sendEmail()` |
-| `sendRenewalConfirmationEmail(companyName, email, pilotNumber, newStartDate, newEndDate)` | Internal | Sends a thank-you confirmation email when a customer renews, including their new effective tenure |
-| `sendTerminationEmail(companyName, email, pilotNumber, endDate)` | Internal | Sends a termination confirmation email when a customer chooses Not Renewing |
+| `sendRenewalReminderEmail(companyName, email, pilotNumber, expiryDate, monthsLeft, worqLocation)` | Internal | Sends the renewal reminder email via `MailApp.sendEmail()`. CC's the location inbox and sets Reply-To to `it@worq.space`. |
+| `sendRenewalConfirmationEmail(companyName, email, pilotNumber, newStartDate, newEndDate, worqLocation)` | Internal | Sends a thank-you confirmation email when a customer renews, including their new effective tenure. CC's the location inbox. |
+| `sendTerminationEmail(companyName, email, pilotNumber, endDate, worqLocation)` | Internal | Sends a termination confirmation email when a customer chooses Not Renewing. CC's the location inbox. |
+| `formatPilotNumber(pilotNumber)` | Internal | Restores the leading zero on pilot numbers that Google Sheets strips when stored as a numeric value (e.g. `327746340` → `0327746340`). |
+| `getLocationEmail(worqLocation)` | Internal | Looks up the location-specific email from the **Addresses** sheet by matching col A (Site) to the customer's WORQ Location. Returns the email in col C, or `null` if no match found. |
 
 **Skip logic in `checkAndSendReminders()`:**
 - Skips rows with no contract end date or no email
@@ -152,10 +163,15 @@ Sends automated renewal reminder emails at 3, 2, 1 month(s) and 0 months (expiry
 - After sending a reminder, sets col F to `Pending` with dropdown validation
 
 **Email Details:**
-- Sender: `it_worq@worq.space` (display name: "WORQ IT Operations")
-- Reminder subject: `Virtual Landline Renewal Reminder - X Month(s) Until Expiry`
-- Confirmation subject: `Virtual Landline Renewal Confirmed`
-- Termination subject: `Virtual Landline Service Termination Confirmed`
+- Format: HTML (`htmlBody`) — text wraps naturally at the reader's window width
+- Sender display name: "WORQ Operations Team" (sent from the script owner's Google account)
+- Reply-To: `it@worq.space` — customer replies route to the IT inbox regardless of who the script runs as
+- CC: Location-specific email from the Addresses sheet (e.g. `ttdi@worq.space`) — only the matching location is CC'd; omitted if no match is found
+- Reminder subject: `⏰ Virtual Landline Renewal Reminder - X Month(s) Until Expiry`
+- Confirmation subject: `✅ Virtual Landline Renewal Confirmed - Thank You, {Company}!`
+- Termination subject: `Virtual Landline Service Termination Confirmation - {Company}`
+
+> **Note on Reply All:** When a customer clicks Reply All, their email client addresses the reply to `it@worq.space` (Reply-To) and CC's the location email. This is the expected behaviour for actual customer accounts. Testing from the same account that sent the email will not reflect Reply-To correctly due to a Gmail self-reply quirk.
 
 ---
 
@@ -164,7 +180,7 @@ Processes renewal decisions from TRACKER col F and updates contract dates and mo
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `syncRenewals()` | Scheduled / Manual | Reads TRACKER col F — processes `Renew` and `Not Renewing` rows |
+| `syncRenewals()` | Scheduled / Manual | Reads TRACKER col F — processes `Renew` and `Not Renewing` rows. Also reads `worqLocation` (col C) to pass to email functions for CC routing. |
 | `populate12MonthsFromDate(sheet, rowNumber, startDate)` | Internal | Populates 12 monthly columns from a given start date: first month = `renew`, subsequent months = `paid` |
 | `extendMonthHeaders(sheet, upToDate)` | Internal | Auto-extends TRACKER month header columns (rows 1 & 2) up to the required date. Called automatically before populating months. No-ops if headers already cover the range. |
 | `markMonthCell(sheet, rowNumber, targetDate, value)` | Internal | Sets a single month column cell to a given value by matching the month header |
