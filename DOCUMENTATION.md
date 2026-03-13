@@ -16,7 +16,7 @@ A Google Apps Script automation system that manages customer contract tracking f
 
 ## Sheet Structure
 
-The spreadsheet contains 4 active sheets:
+The spreadsheet contains 5 active sheets:
 
 ### 1. TRACKER (Main sheet)
 The central tracking sheet with a monthly payment grid. It has **two header rows**:
@@ -49,9 +49,12 @@ Auto-populated by the linked Google Form.
 | F-X | Other fields | Ignored |
 
 ### 3. ARCHIVED
-Storage for terminated customer records. Same column structure as TRACKER (col A = SEQUENCE formula, col B onwards = customer data). Terminated companies are never re-added to TRACKER by the copy function. Archived companies can be restored back to TRACKER via `[07] Restore Archived Customer`.
+Storage for terminated customer records. Same column structure as TRACKER (col A = SEQUENCE formula, col B onwards = customer data). Terminated companies are never re-added to TRACKER by the copy function. Archived companies can be restored back to TRACKER via `[06] Restore Archived Customer`.
 
-### 4. Addresses
+### 4. Archived Form Responses
+Storage for duplicate form submissions. When the `onFormSubmit` trigger detects that an incoming submission's email already exists in a prior row of Form Responses 1, the row is moved here automatically. Same column structure as Form Responses 1 (Timestamp, Email, Company Name, Registration Number, WORQ Location, ...). Created automatically on first duplicate detection if the sheet does not exist.
+
+### 5. Addresses
 Lookup table mapping WORQ location names to their location-specific email addresses. Used by `getLocationEmail()` to CC the correct location inbox on customer emails.
 
 | Column | Field | Description |
@@ -80,6 +83,8 @@ The main entry point. Contains the global `CONFIG` object (declared with `var` f
 | CONTRACT_END | H (8) | Contract end date |
 | FIRST_MONTH | I (9) | First month column (Feb-2024) |
 
+**CONFIG.ARCHIVED_FORM_RESPONSES_SHEET:** Sheet name for duplicate form submissions (`'Archived Form Responses'`).
+
 **CONFIG.VENDOR_EMAIL:** Main recipient for vendor notification emails (AstriCloud).
 
 **CONFIG.VENDOR_CC:** Comma-separated CC list for vendor notification emails (AstriCloud team + WORQ internal recipients).
@@ -98,13 +103,14 @@ The main entry point. Contains the global `CONFIG` object (declared with `var` f
 | [03] | Backfill Missing Paid Status | `backfillMissingPaidStatus()` |
 | [04] | Sync Renewals from Renewal Status | `syncRenewals()` |
 | [05] | Archive Terminated Customers | `archiveTerminated()` |
-| [06] | Sort by Contract Start Date | `sortByContractStartDate()` |
-| [07] | Restore Archived Customer | `showRestoreArchivedDialog()` |
+| [06] | Restore Archived Customer | `showRestoreArchivedDialog()` |
 | — | *(separator)* | — |
-| | Setup Renewal Status Dropdown | `setupRenewalStatusDropdown()` |
-| | Remove Archived Duplicates from Tracker | `removeArchivedDuplicatesFromTracker()` |
+| | Sort by Contract Start Date | `sortByContractStartDate()` |
+| | Highlight Renewal Urgency | `highlightRenewalUrgency()` |
+| | Clear Renewal Highlights | `clearRenewalHighlights()` |
+| | Find Lapsed Contracts | `findLapsedContracts()` |
 
-> `setupTriggers()` and `removeAllTriggers()` are currently commented out. Triggers are managed manually via the Apps Script Triggers UI.
+> The following are available but commented out of the menu (run directly from the Apps Script editor): `setupFormSubmitTrigger()`, `removeFormSubmitTrigger()`, `setupRenewalStatusDropdown()`, `removeArchivedDuplicatesFromTracker()`, `setupAutoReminderTrigger()`, `removeAutoReminderTrigger()`.
 
 ---
 
@@ -271,15 +277,53 @@ HTML modal rendered by `showRestoreArchivedDialog()` via `HtmlService.createTemp
 
 ---
 
+### 10 FormSubmitHandler.gs — Automatic Form Submit Processing
+Handles new Google Form submissions automatically via an installable `onFormSubmit` trigger. On each submission it highlights the new row, detects duplicate emails, routes duplicates to a separate archive sheet, and notifies the AstriCloud vendor for genuine new signups.
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `onFormSubmit(e)` | Installable trigger | Main handler: clears old yellow highlight → highlights new row → checks for duplicate email → moves duplicate to Archived Form Responses or sends vendor notification |
+| `clearFormHighlights(formSheet)` | Internal | Scans all data rows in Form Responses 1 and removes yellow (`#FFFF00`) backgrounds only, leaving other cell colours untouched |
+| `isEmailDuplicate(formSheet, email, currentRowNum)` | Internal | Returns `true` if the submitted email already exists in any prior row of Form Responses 1 (case-insensitive). Skips the header row and the current new row. |
+| `moveToArchivedFormResponses(formSheet, rowNum, rowData)` | Internal | Appends the full row to the **Archived Form Responses** sheet (same column structure — direct copy), then deletes the row from Form Responses 1 to keep it clean. Creates the archive sheet automatically if it does not exist. |
+| `sendNewSignupVendorEmail(companyName, email, worqLocation, timestamp)` | Internal | Sends an HTML new-signup notification to the AstriCloud vendor. **To:** `CONFIG.VENDOR_EMAIL`. **CC:** `CONFIG.VENDOR_CC` + outlet email from `getLocationEmail()` (appended if found). **Subject:** `New Virtual Landline Signup Request - {Company Name}`. **ReplyTo:** `it@worq.space`. |
+| `setupFormSubmitTrigger()` | Manual (editor) | Creates an installable `onFormSubmit` trigger for the spreadsheet. Removes any existing trigger with the same handler first (idempotent). |
+| `removeFormSubmitTrigger()` | Manual (editor) | Removes all installable `onFormSubmit` triggers pointing to `onFormSubmit`. |
+
+**Duplicate check logic:**
+- Email from Col B (FORM_COLS.EMAIL) is normalised with `.toLowerCase().trim()`
+- All rows in Form Responses 1 are scanned except the header (row 1) and the current new row
+- If any prior row has the same email → duplicate → row is moved to Archived Form Responses; no vendor email is sent
+
+**Yellow highlight logic:**
+- On every form submit: all yellow (`#FFFF00`) backgrounds are cleared first, then the new submission row is highlighted yellow
+- Ensures only one row is ever highlighted at a time
+
+**Vendor email CC:**
+- Base: `CONFIG.VENDOR_CC` (full AstriCloud + WORQ recipient list)
+- The outlet email from the Addresses sheet is appended if the submitted WORQ Location matches a row in col A
+
+> **Trigger setup**: Run `setupFormSubmitTrigger()` once from the Apps Script editor (or uncomment its menu item) to install the trigger. Verify in Apps Script > Triggers that an `onFormSubmit` trigger pointing to `onFormSubmit` is present.
+
+---
+
 ## Data Flow Diagram
 
 ```
 Google Form
     |
     v
-[Form Responses 1]
+[Form Responses 1]  ←── onFormSubmit() fires automatically on each submission
+    |   |                 1. Clears old yellow highlight
+    |   |                 2. Highlights new row yellow
+    |   |                 3. Checks email for duplicates in prior rows
+    |   |
+    |   |── duplicate email?
+    |   |       YES → move row to [Archived Form Responses] (no vendor email)
+    |   |       NO  → sendNewSignupVendorEmail() to AstriCloud
+    |   |                 (CC: VENDOR_CC + outlet email)
     |
-    | copyNewEntriesToTracker()
+    | copyNewEntriesToTracker()  (manual, [01] menu)
     | (skips companies already in TRACKER or ARCHIVED)
     v
 [TRACKER]

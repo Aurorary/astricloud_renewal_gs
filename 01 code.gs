@@ -48,6 +48,9 @@ var CONFIG = {
   // First month in tracker (Feb-2024)
   FIRST_MONTH_DATE: new Date('2024-02-01'),
 
+  // Archived form responses (duplicate submissions)
+  ARCHIVED_FORM_RESPONSES_SHEET: 'Archived Form Responses',
+
   // Vendor notification (AstriCloud)
   VENDOR_EMAIL: 'theinosha@astricloud.com',
   VENDOR_CC: 'shahril@astricloud.com,mgt@astricloud.com,it@worq.space,accounts@astricloud.com,operations@worq.space,accounts@worq.space,sasikala@worq.space',
@@ -76,6 +79,9 @@ function onOpen() {
     .addItem('Clear Renewal Highlights', 'clearRenewalHighlights')
     .addItem('Find Lapsed Contracts', 'findLapsedContracts')
     .addToUi();
+    // .addSeparator()
+    // .addItem('Setup Form Submit Trigger', 'setupFormSubmitTrigger')
+    // .addItem('Remove Form Submit Trigger', 'removeFormSubmitTrigger')
     // .addItem('Setup Renewal Status Dropdown', 'setupRenewalStatusDropdown')
     // .addItem('Remove Archived Duplicates from Tracker', 'removeArchivedDuplicatesFromTracker')
     // .addSeparator()

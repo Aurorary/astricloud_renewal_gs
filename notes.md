@@ -1,8 +1,5 @@
 PENDING ITEMS TO DO
 
-8 add cc to outlet for all email
-
-9 improve the email text wrapping 
 
 
 DONE
@@ -20,3 +17,7 @@ DONE
 example if customer start their subscription from Feb-2024 until Jan 2027, this companies should be sorted from their oldest start date
 
 7 i need a way to sort all the customer contract start date from oldest to newest and all their histories intact
+
+8 add cc to outlet for all email
+
+9 improve the email text wrapping 

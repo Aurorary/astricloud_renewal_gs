@@ -11,8 +11,7 @@ Google Apps Script automation for WORQ's AstriCloud (virtual landline) service �
 | [03] | Backfill Missing Paid Status | Fills historical rows that have a contract date but no monthly payment data |
 | [04] | Sync Renewals from Renewal Status | Extends contracts for "Renew" rows and marks "Not Renewing" rows as terminated |
 | [05] | Archive Terminated Customers | Moves rows with `terminate` status from TRACKER to ARCHIVED sheet |
-| [06] | Sort by Contract Start Date | Re-sorts TRACKER rows oldest → newest by contract start date |
-| [07] | Restore Archived Customer | Opens a dialog to select and move archived companies back to TRACKER (for last-minute renewals) |
+| [06] | Restore Archived Customer | Opens a dialog to select and move archived companies back to TRACKER (for last-minute renewals) |
 
 ## Sheets
 
@@ -20,7 +19,8 @@ Google Apps Script automation for WORQ's AstriCloud (virtual landline) service �
 |-------|---------|
 | TRACKER | Main customer tracking grid with monthly payment status columns |
 | Form Responses 1 | Auto-populated by the linked Google Form |
-| ARCHIVED | Terminated customer records; can be restored back to TRACKER via [07] |
+| ARCHIVED | Terminated customer records; can be restored back to TRACKER via [06] |
+| Archived Form Responses | Duplicate form submissions (same email re-submitted); moved here automatically by the form submit trigger |
 | Addresses | WORQ location → email lookup table; used to CC the correct location inbox on customer emails |
 
 ## File Structure
@@ -34,6 +34,8 @@ Google Apps Script automation for WORQ's AstriCloud (virtual landline) service �
 06 ArchiveTerminated.gs     — Archive terminated customers / cleanup duplicates
 07 SortByContractDate.gs    — Sort TRACKER by contract start date
 08 RestoreArchived.gs       — Restore archived customers back to TRACKER
+09 HealthCheck.gs           — Health check utilities
+10 FormSubmitHandler.gs     — Form submit trigger: highlight, duplicate check, vendor email
 RestoreArchivedDialog.html  — HTML modal UI for the restore dialog
 ```
 
@@ -44,7 +46,9 @@ RestoreArchivedDialog.html  — HTML modal UI for the restore dialog
 3. Authenticate: `clasp login`
 4. Push changes: `clasp push`
 
-In the Apps Script Triggers UI, create an installable **On edit** trigger pointing to `onPilotNumberEdit` to enable auto-population of contract dates when a pilot number is entered.
+In the Apps Script Triggers UI, create the following installable triggers:
+- **On edit** → `onPilotNumberEdit` — auto-populates contract dates when a pilot number is entered
+- **On form submit** → `onFormSubmit` — highlights new submissions, detects duplicates, sends vendor email (run `setupFormSubmitTrigger()` from the Apps Script editor to install this)
 
 ## Documentation
 
